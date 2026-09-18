@@ -1,0 +1,54 @@
+name: MenuBarHider
+options:
+  bundleIdPrefix: com.sava
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    # Ad-hoc signing builds anywhere. Every ad-hoc rebuild changes the signature and macOS
+    # drops the Accessibility grant, so owners of an Apple certificate should override this:
+    #   make install SIGN_IDENTITY="Developer ID Application" TEAM=XXXXXXXXXX
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: NO
+    ENABLE_APP_SANDBOX: NO
+targets:
+  MenuBarHider:
+    type: application
+    platform: macOS
+    sources:
+      - path: MenuBarHider
+        excludes: ["Resources/Info.plist"]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sava.MenuBarHider
+        PRODUCT_NAME: MenuBarHider
+        INFOPLIST_FILE: MenuBarHider/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  MenuBarHiderTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [MenuBarHiderTests]
+    dependencies:
+      - target: MenuBarHider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sava.MenuBarHiderTests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/MenuBarHider.app/Contents/MacOS/MenuBarHider"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+schemes:
+  MenuBarHider:
+    build:
+      targets:
+        MenuBarHider: all
+        MenuBarHiderTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets: [MenuBarHiderTests]

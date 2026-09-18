@@ -1,0 +1,44 @@
+included:
+  - MenuBarHider
+  - MenuBarHiderTests
+excluded:
+  - build
+  - MenuBarHider.xcodeproj
+
+disabled_rules:
+  - todo
+
+opt_in_rules:
+  - closure_spacing
+  - contains_over_filter_is_empty
+  - empty_count
+  - explicit_init
+  - fatal_error_message
+  - first_where
+  - implicit_return
+  - modifier_order
+  - operator_usage_whitespace
+  - redundant_nil_coalescing
+  - sorted_first_last
+  - toggle_bool
+  - unneeded_parentheses_in_closure_argument
+  - vertical_whitespace_closing_braces
+  - yoda_condition
+
+# swift-format emits trailing commas in multi-line literals; keep both tools in agreement.
+trailing_comma:
+  mandatory_comma: true
+
+line_length:
+  warning: 120
+  error: 160
+  ignores_comments: true
+
+identifier_name:
+  min_length: 2
+  excluded: [x, y, id]
+
+type_body_length:
+  warning: 300
+function_body_length:
+  warning: 60
