@@ -103,6 +103,12 @@ flowchart LR
 - **Which icons.** Positions of third-party items come from each app's
   `AXExtrasMenuBar`; the separators are the app's own `NSStatusItem`s. The scan runs
   concurrently across apps and takes about 100 ms.
+- **Time Machine, VPN and other Apple menu extras.** They are plugins loaded into
+  `SystemUIServer`, and `MenuBarAgent` attributes all of them to that one bundle
+  identifier, so the allow-list cannot hide one without the others. Instead the app
+  unloads each extra that sits between the separators through the private
+  `CoreMenuExtra` calls in HIServices and loads it back on expand. `SystemUIServer` lists
+  its items in load order without identifiers, and that order is how they are told apart.
 - **Degradation.** If Apple removes the framework or the class, the menu says
   *Hiding unavailable on this macOS build* and nothing else changes.
 
@@ -121,6 +127,10 @@ hidden icons show while the cursor sits on the clock.
   crashing, but hiding will stop until a workaround exists.
 - Items without a bundle identifier cannot be allow-listed and stay hidden whenever the
   bar is collapsed.
+- A collapsed Apple menu extra is really unloaded, so System Settings shows it as off
+  until the bar expands. The app reloads it on quit and on the next launch after a crash;
+  if you delete the app while the bar is collapsed, turn the extra back on in System
+  Settings.
 - Multi-display setups are untested; the separators are measured on the primary display.
 
 ## Development

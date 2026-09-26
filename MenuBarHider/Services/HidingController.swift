@@ -35,6 +35,7 @@ final class HidingController {
     private let engine: HidingEngine
     private let items: MenuBarItemSource
     private let runningApps: RunningAppsSource
+    private let extras: MenuExtraHost
     private let separators: () -> SeparatorPositions
     private let scheduler: TimerScheduler
     let settings: Settings
@@ -59,6 +60,7 @@ final class HidingController {
         engine: HidingEngine,
         items: MenuBarItemSource,
         runningApps: RunningAppsSource,
+        extras: MenuExtraHost,
         separators: @escaping () -> SeparatorPositions,
         settings: Settings,
         scheduler: TimerScheduler
@@ -66,6 +68,7 @@ final class HidingController {
         self.engine = engine
         self.items = items
         self.runningApps = runningApps
+        self.extras = extras
         self.separators = separators
         self.settings = settings
         self.scheduler = scheduler
@@ -79,6 +82,7 @@ final class HidingController {
     // MARK: - Intent
 
     func start() {
+        reconcileMenuExtras()
         permissionPoll = scheduler.schedule(after: Self.launchSettleDelay) { [weak self] in
             self?.hideWhenPermitted()
         }
@@ -150,18 +154,27 @@ final class HidingController {
         permissionPoll?.cancel()
         state = .shown
         engine.release()
+        reconcileMenuExtras()
     }
 
     // MARK: - Derivation
 
     private var desiredAllowList: [String]? {
-        guard state == .hidden, canHide, !pointerOverClock, !hiddenSet.isEmpty else { return nil }
+        let hiddenApps = hiddenSet.filter { !MenuExtras.isExtra($0) }
+        guard state == .hidden, canHide, !pointerOverClock, !hiddenApps.isEmpty else { return nil }
         return HiddenSet.allowList(
-            running: runningApps.bundleIDs, hidden: hiddenSet, alwaysAllowed: SystemItems.alwaysAllowedBundleIDs)
+            running: runningApps.bundleIDs, hidden: hiddenApps, alwaysAllowed: SystemItems.alwaysAllowedBundleIDs)
+    }
+
+    /// No pointerOverClock check: unloaded extras do not block Notification Center.
+    private var desiredRemovedExtras: Set<String> {
+        guard state == .hidden, canHide else { return [] }
+        return hiddenSet.filter(MenuExtras.isExtra)
     }
 
     /// Idempotent: an unchanged allow list is not re-sent.
     private func reconcile() {
+        reconcileMenuExtras()
         guard let desired = desiredAllowList else {
             engine.release()
             return
@@ -173,6 +186,18 @@ final class HidingController {
             if let error { Log.controller.error("restrict failed: \(error.localizedDescription)") }
             self.onChange?()
         }
+    }
+
+    private func reconcileMenuExtras() {
+        let desired = desiredRemovedExtras
+        var removed = settings.removedMenuExtraIDs
+        for id in removed.subtracting(desired).sorted() where extras.restore(id) {
+            removed.remove(id)
+        }
+        for id in desired.subtracting(removed).sorted() where extras.remove(id) {
+            removed.insert(id)
+        }
+        settings.removedMenuExtraIDs = removed
     }
 
     private func refreshHiddenSet() {

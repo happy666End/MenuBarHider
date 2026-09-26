@@ -1,7 +1,7 @@
 import AppKit
 import ApplicationServices
 
-/// Reads third-party menu bar item positions through Accessibility.
+/// Reads menu bar item positions through Accessibility.
 protocol MenuBarItemSource {
     var isTrusted: Bool { get }
     func scan() -> [MenuBarItemPosition]
@@ -10,6 +10,12 @@ protocol MenuBarItemSource {
 final class MenuBarScanner: MenuBarItemSource {
     /// Per-process cap for Accessibility calls: an unresponsive app must not stall the scan.
     private static let messagingTimeout: Float = 0.2
+
+    private let extras: MenuExtraHost
+
+    init(extras: MenuExtraHost) {
+        self.extras = extras
+    }
 
     var isTrusted: Bool { AXIsProcessTrusted() }
 
@@ -40,9 +46,27 @@ final class MenuBarScanner: MenuBarItemSource {
             result.append(contentsOf: positions)
             lock.unlock()
         }
+        result.append(contentsOf: menuExtraPositions())
         let elapsed = Int(Date().timeIntervalSince(started) * 1000)
         Log.controller.error("AX scan took \(elapsed) ms, apps: \(candidates.count), items: \(result.count)")
         return result
+    }
+
+    private func menuExtraPositions() -> [MenuBarItemPosition] {
+        guard
+            let server = NSRunningApplication.runningApplications(
+                withBundleIdentifier: SystemItems.systemUIServerBundleID
+            ).first,
+            let bar = AXAttributes.extrasMenuBar(pid: server.processIdentifier, timeout: Self.messagingTimeout)
+        else { return [] }
+        let children = AXAttributes.elements(bar, kAXChildrenAttribute)
+        let xs = children.compactMap { AXAttributes.point($0, kAXPositionAttribute)?.x }
+        let loaded = extras.loadedExtraIDs()
+        guard xs.count == children.count, xs.count == loaded.count else {
+            Log.controller.error("menu extras skipped: \(children.count) items, \(loaded.count) loaded")
+            return []
+        }
+        return MenuExtras.positions(itemXs: xs, loadedIDs: loaded)
     }
 
     private static func positions(pid: pid_t, bundleID: String) -> [MenuBarItemPosition] {

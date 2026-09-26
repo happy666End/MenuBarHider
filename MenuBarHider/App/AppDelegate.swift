@@ -11,10 +11,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MenuBarScanner.requestTrust()
 
         statusItem = StatusItemController()
+        let extras = SystemUIServerExtras()
         controller = HidingController(
             engine: MenuBarAgentBridge(),
-            items: MenuBarScanner(),
+            items: MenuBarScanner(extras: extras),
             runningApps: WorkspaceRunningApps(),
+            extras: extras,
             separators: { [weak statusItem] in statusItem?.separators ?? SeparatorPositions() },
             settings: Settings.shared,
             scheduler: DispatchTimerScheduler()

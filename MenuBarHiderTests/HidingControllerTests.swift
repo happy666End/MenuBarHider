@@ -2,70 +2,12 @@ import XCTest
 
 @testable import MenuBarHider
 
-private final class FakeEngine: HidingEngine {
-    var isAvailable = true
-    var appliedAllowList: [String]?
-    var restrictions: [[String]] = []
-    var releases = 0
-    var nextError: Error?
-
-    func restrict(allowedBundleIDs: [String], completion: @escaping (Error?) -> Void) {
-        restrictions.append(allowedBundleIDs)
-        if nextError == nil { appliedAllowList = allowedBundleIDs }
-        completion(nextError)
-    }
-
-    func release() {
-        guard appliedAllowList != nil else { return }
-        appliedAllowList = nil
-        releases += 1
-    }
-}
-
-private final class FakeItems: MenuBarItemSource {
-    var isTrusted = true
-    var positions: [MenuBarItemPosition] = []
-    func scan() -> [MenuBarItemPosition] { positions }
-}
-
-private final class FakeRunning: RunningAppsSource {
-    var bundleIDs: [String] = []
-}
-
-private final class ManualScheduler: TimerScheduler {
-    final class Token: Cancellable {
-        var cancelled = false
-        func cancel() { cancelled = true }
-    }
-    struct Entry {
-        let seconds: TimeInterval
-        let block: () -> Void
-        let token: Token
-    }
-    var pending: [Entry] = []
-    var live: [Entry] { pending.filter { !$0.token.cancelled } }
-
-    func schedule(after seconds: TimeInterval, _ block: @escaping () -> Void) -> Cancellable {
-        let token = Token()
-        pending.append(Entry(seconds: seconds, block: block, token: token))
-        return token
-    }
-
-    /// Runs every live timer once; timers armed by those blocks wait for the next call.
-    func fireAll() {
-        let entries = live
-        pending = []
-        for entry in entries { entry.block() }
-    }
-}
-
-private struct Boom: Error {}
-
 @MainActor
 final class HidingControllerTests: XCTestCase {
     private var engine: FakeEngine!
     private var items: FakeItems!
     private var running: FakeRunning!
+    private var extras: FakeExtras!
     private var scheduler: ManualScheduler!
     private var settings: Settings!
     private var suiteName: String!
@@ -77,6 +19,7 @@ final class HidingControllerTests: XCTestCase {
         engine = FakeEngine()
         items = FakeItems()
         running = FakeRunning()
+        extras = FakeExtras()
         scheduler = ManualScheduler()
         suiteName = "HidingControllerTests-\(UUID().uuidString)"
         settings = Settings(defaults: UserDefaults(suiteName: suiteName)!)
@@ -90,7 +33,7 @@ final class HidingControllerTests: XCTestCase {
 
     private func makeController() -> HidingController {
         HidingController(
-            engine: engine, items: items, runningApps: running,
+            engine: engine, items: items, runningApps: running, extras: extras,
             separators: { [unowned self] in SeparatorPositions(separatorX: 500, leftSeparatorX: self.leftSeparatorX) },
             settings: settings, scheduler: scheduler)
     }
@@ -317,6 +260,74 @@ final class HidingControllerTests: XCTestCase {
         controller.show()
         scheduler.fireAll()
         XCTAssertEqual(engine.restrictions.count, 1, "a pending hover restore must not re-hide after show")
+    }
+
+    // MARK: - Menu extras
+
+    private let timeMachine = "com.apple.menuextra.TimeMachine"
+    private let vpn = "com.apple.menuextra.vpn"
+
+    private func hideTimeMachineAndOneApp() {
+        extras.loaded = [vpn, timeMachine]
+        items.positions = [
+            .init(bundleID: "left", x: 100), .init(bundleID: timeMachine, x: 200), .init(bundleID: vpn, x: 900),
+        ]
+        controller.hide()
+    }
+
+    func testHideUnloadsOnlyExtrasBetweenSeparators() {
+        hideTimeMachineAndOneApp()
+        XCTAssertEqual(extras.removals, [timeMachine])
+        XCTAssertEqual(settings.removedMenuExtraIDs, [timeMachine])
+        XCTAssertTrue(engine.restrictions[0].contains("com.apple.systemuiserver"), "VPN must stay visible")
+    }
+
+    func testHidingOnlyExtrasHoldsNoRestriction() {
+        extras.loaded = [timeMachine]
+        items.positions = [.init(bundleID: timeMachine, x: 100)]
+        controller.hide()
+        XCTAssertEqual(extras.removals, [timeMachine])
+        XCTAssertTrue(engine.restrictions.isEmpty, "assessment mode would block Notification Center for nothing")
+    }
+
+    func testShowReloadsUnloadedExtras() {
+        hideTimeMachineAndOneApp()
+        controller.show()
+        XCTAssertEqual(extras.restorations, [timeMachine])
+        XCTAssertEqual(settings.removedMenuExtraIDs, [])
+    }
+
+    func testPointerOverClockKeepsExtrasUnloaded() {
+        hideTimeMachineAndOneApp()
+        controller.pointerOverClock = true
+        XCTAssertEqual(engine.releases, 1)
+        XCTAssertTrue(extras.restorations.isEmpty)
+    }
+
+    func testStartReloadsExtrasLeftUnloadedByPreviousRun() {
+        settings.removedMenuExtraIDs = [timeMachine]
+        controller.start()
+        XCTAssertEqual(extras.restorations, [timeMachine])
+        XCTAssertEqual(settings.removedMenuExtraIDs, [])
+    }
+
+    func testShutdownReloadsExtras() {
+        hideTimeMachineAndOneApp()
+        controller.shutdown()
+        XCTAssertEqual(extras.restorations, [timeMachine])
+        XCTAssertEqual(settings.removedMenuExtraIDs, [])
+    }
+
+    func testFailedReloadIsRetriedLater() {
+        hideTimeMachineAndOneApp()
+        extras.failRestore = true
+        controller.show()
+        XCTAssertEqual(settings.removedMenuExtraIDs, [timeMachine], "an extra that failed to load must be retried")
+
+        extras.failRestore = false
+        controller.shutdown()
+        XCTAssertEqual(extras.restorations, [timeMachine, timeMachine])
+        XCTAssertEqual(settings.removedMenuExtraIDs, [])
     }
 
     func testAutoHideWhilePointerAlreadyOnClockStaysUnrestricted() {

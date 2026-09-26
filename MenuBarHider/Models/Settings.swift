@@ -7,6 +7,7 @@ final class Settings {
     private enum Key {
         static let autoHideSeconds = "autoHideSeconds"
         static let hiddenBundleIDs = "hiddenBundleIDs"
+        static let removedMenuExtraIDs = "removedMenuExtraIDs"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -24,5 +25,10 @@ final class Settings {
     var hiddenBundleIDs: Set<String> {
         get { Set(defaults.stringArray(forKey: Key.hiddenBundleIDs) ?? []) }
         set { defaults.set(Array(newValue).sorted(), forKey: Key.hiddenBundleIDs) }
+    }
+
+    var removedMenuExtraIDs: Set<String> {
+        get { Set(defaults.stringArray(forKey: Key.removedMenuExtraIDs) ?? []) }
+        set { defaults.set(Array(newValue).sorted(), forKey: Key.removedMenuExtraIDs) }
     }
 }

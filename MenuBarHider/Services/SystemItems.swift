@@ -7,12 +7,13 @@ enum SystemItems {
     static let allowedIdentifiers: [NSNumber] = (0..<64).map { NSNumber(value: $0) }
 
     static let menuBarAgentBundleID = "com.apple.MenuBarAgent"
+    static let systemUIServerBundleID = "com.apple.systemuiserver"
 
     /// Apple agents whose menu bar extras are addressed by bundle id, not by system item.
     static let alwaysAllowedBundleIDs: Set<String> = [
         "com.apple.controlcenter",
         menuBarAgentBundleID,
-        "com.apple.systemuiserver",
+        systemUIServerBundleID,
         "com.apple.TextInputMenuAgent",
         "com.apple.Siri",
         "com.apple.Spotlight",
