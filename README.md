@@ -35,10 +35,14 @@ that survived do, but it is small, open and free.
 
 ## Install
 
-Requires macOS 27. Download `MenuBarHider-x.y.z.zip` from the
-[latest release](https://github.com/happy666End/MenuBarHider/releases/latest), unzip it and
-drag **MenuBarHider.app** to *Applications*. The app is signed with a Developer ID and
-notarized, so it opens without Gatekeeper warnings.
+Requires macOS 27. Download `MenuBarHider-x.y.z.dmg` from the
+[latest release](https://github.com/happy666End/MenuBarHider/releases/latest), open it and
+drag **MenuBarHider.app** onto *Applications* (a `.zip` is there too). The app is signed with
+a Developer ID and notarized, so it opens without Gatekeeper warnings.
+
+The app has to run from *Applications*: macOS hides the icons of apps started anywhere else,
+MenuBarHider's own `»` included. If you launch it from the disk image or *Downloads*, it
+offers to move itself to *Applications* and hides nothing until then.
 
 On first launch grant **Accessibility** in *System Settings → Privacy & Security →
 Accessibility*. The app picks it up within two seconds, no restart needed.
@@ -126,7 +130,8 @@ hidden icons show while the cursor sits on the clock.
 - Private API. Apple can close it in any 27.x update; the app will report it instead of
   crashing, but hiding will stop until a workaround exists.
 - Items without a bundle identifier cannot be allow-listed and stay hidden whenever the
-  bar is collapsed.
+  bar is collapsed. Items from apps launched outside `/Applications`, including
+  `~/Applications`, stay hidden too, because `MenuBarAgent` ignores their allow-list entries.
 - A collapsed Apple menu extra is really unloaded, so System Settings shows it as off
   until the bar expands. The app reloads it on quit and on the next launch after a crash;
   if you delete the app while the bar is collapsed, turn the extra back on in System

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.2 — 2026-10-02
+
+### Fixed
+
+- Apps that live only in the menu bar (Raycast, Tunnelblick and most others) no longer stay
+  hidden when launched while the bar is collapsed. macOS does not post its launch
+  notification for them, so the app now watches the list of running apps instead.
+- A copy started outside *Applications* (the disk image, *Downloads*, a translocated download)
+  no longer hides its own `»`, which left no way to expand the bar. It offers to move itself
+  to *Applications* and relaunch, and keeps hiding off until it is moved.
+
+### Added
+
+- Releases ship a signed, notarized disk image next to the zip.
+
 ## 0.1.1 — 2026-09-26
 
 ### Fixed

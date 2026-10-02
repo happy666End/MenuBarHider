@@ -39,6 +39,7 @@ final class HidingController {
     private let separators: () -> SeparatorPositions
     private let scheduler: TimerScheduler
     let settings: Settings
+    let isInApplications: Bool
 
     private(set) var state: State = .shown
     private(set) var hiddenSet: Set<String>
@@ -62,6 +63,7 @@ final class HidingController {
         runningApps: RunningAppsSource,
         extras: MenuExtraHost,
         separators: @escaping () -> SeparatorPositions,
+        isInApplications: Bool,
         settings: Settings,
         scheduler: TimerScheduler
     ) {
@@ -70,6 +72,7 @@ final class HidingController {
         self.runningApps = runningApps
         self.extras = extras
         self.separators = separators
+        self.isInApplications = isInApplications
         self.settings = settings
         self.scheduler = scheduler
         self.hiddenSet = settings.hiddenBundleIDs
@@ -77,7 +80,7 @@ final class HidingController {
 
     var isEngineAvailable: Bool { engine.isAvailable }
     var isAccessibilityTrusted: Bool { items.isTrusted }
-    var canHide: Bool { engine.isAvailable && items.isTrusted }
+    var canHide: Bool { engine.isAvailable && isInApplications && items.isTrusted }
 
     // MARK: - Intent
 
@@ -108,8 +111,8 @@ final class HidingController {
     func hide() {
         cancelPendingHide()
         guard canHide else {
-            Log.controller.error(
-                "hide skipped: engine=\(self.engine.isAvailable) accessibility=\(self.items.isTrusted)")
+            let reasons = "engine=\(engine.isAvailable) in /Applications=\(isInApplications) AX=\(items.isTrusted)"
+            Log.controller.error("hide skipped: \(reasons, privacy: .public)")
             return
         }
         refreshHiddenSet()
@@ -226,7 +229,7 @@ final class HidingController {
     }
 
     private func hideWhenPermitted() {
-        guard state == .shown, isEngineAvailable else { return }
+        guard state == .shown, isEngineAvailable, isInApplications else { return }
         if isAccessibilityTrusted {
             hide()
         } else {

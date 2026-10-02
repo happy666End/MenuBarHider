@@ -5,10 +5,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: StatusItemController!
     private var controller: HidingController!
     private var hoverMonitor: ClockHoverMonitor!
-    private var observers: [NSObjectProtocol] = []
+    private var runningAppsObservation: NSKeyValueObservation?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        MenuBarScanner.requestTrust()
+        let isInApplications = AppLocation.isInApplications(Bundle.main.bundleURL)
+        if isInApplications {
+            MenuBarScanner.requestTrust()
+        } else if ApplicationsMover.offerMove() {
+            return
+        }
 
         statusItem = StatusItemController()
         let extras = SystemUIServerExtras()
@@ -18,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             runningApps: WorkspaceRunningApps(),
             extras: extras,
             separators: { [weak statusItem] in statusItem?.separators ?? SeparatorPositions() },
+            isInApplications: isInApplications,
             settings: Settings.shared,
             scheduler: DispatchTimerScheduler()
         )
@@ -35,12 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hoverMonitor.start()
 
-        let center = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
-            observers.append(
-                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.controller.runningAppsChanged() }
-                })
+        // didLaunchApplicationNotification skips LSUIElement apps; this KVO fires on main.
+        runningAppsObservation = NSWorkspace.shared.observe(\.runningApplications) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.controller.runningAppsChanged() }
         }
 
         controller.start()

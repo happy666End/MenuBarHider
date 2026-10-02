@@ -31,11 +31,11 @@ final class HidingControllerTests: XCTestCase {
         super.tearDown()
     }
 
-    private func makeController() -> HidingController {
+    private func makeController(isInApplications: Bool = true) -> HidingController {
         HidingController(
             engine: engine, items: items, runningApps: running, extras: extras,
             separators: { [unowned self] in SeparatorPositions(separatorX: 500, leftSeparatorX: self.leftSeparatorX) },
-            settings: settings, scheduler: scheduler)
+            isInApplications: isInApplications, settings: settings, scheduler: scheduler)
     }
 
     private func hideOneApp() {
@@ -176,6 +176,26 @@ final class HidingControllerTests: XCTestCase {
         scheduler.fireAll()
         XCTAssertEqual(controller.state, .hidden)
         XCTAssertEqual(engine.restrictions.count, 1)
+    }
+
+    func testOutsideApplicationsNeverHides() {
+        controller = makeController(isInApplications: false)
+        items.positions = [.init(bundleID: "left", x: 100)]
+
+        controller.hide()
+
+        XCTAssertEqual(controller.state, .shown)
+        XCTAssertTrue(engine.restrictions.isEmpty, "MenuBarAgent would hide our own separator too")
+    }
+
+    func testOutsideApplicationsDoesNotWaitForAccessibility() {
+        controller = makeController(isInApplications: false)
+        items.isTrusted = false
+
+        controller.start()
+        scheduler.fireAll()
+
+        XCTAssertTrue(scheduler.live.isEmpty, "nothing to wait for until the app is moved")
     }
 
     // MARK: - Running apps

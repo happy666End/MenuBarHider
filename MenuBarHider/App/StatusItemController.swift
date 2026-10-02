@@ -88,7 +88,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard let controller else { return }
 
         menu.addItem(header(controller))
-        if !controller.isAccessibilityTrusted {
+        if !controller.isInApplications {
+            menu.addItem(item("Move to Applications…", symbol: "folder", action: #selector(moveToApplications)))
+        } else if !controller.isAccessibilityTrusted {
             menu.addItem(
                 item("Open Accessibility Settings…", symbol: "hand.raised", action: #selector(openAccessibility)))
         }
@@ -119,6 +121,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let symbol: String
         if !controller.isEngineAvailable {
             status = "Hiding unavailable on this macOS build"
+            symbol = "exclamationmark.triangle"
+        } else if !controller.isInApplications {
+            status = "Hiding works only from Applications"
             symbol = "exclamationmark.triangle"
         } else if !controller.isAccessibilityTrusted {
             status = "Accessibility permission required"
@@ -183,6 +188,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    @objc private func moveToApplications() {
+        ApplicationsMover.move()
     }
 
     @objc private func openRepository() {
