@@ -31,27 +31,21 @@ enum ApplicationsMover {
             alert.runModal()
             return false
         }
-        relaunch(from: installed)
-        return true
+        return relaunch(from: installed)
     }
 
-    private static func relaunch(from url: URL) {
-        // Another running copy would keep its separators and its restriction alive.
-        let ownPID = ProcessInfo.processInfo.processIdentifier
-        for app in NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
-        where app.processIdentifier != ownPID {
-            app.terminate()
+    private static func relaunch(from url: URL) -> Bool {
+        let helper: Process
+        do {
+            helper = try ApplicationRelaunch.prepare(from: url)
+        } catch {
+            Log.ui.error("relaunch from Applications failed: \(error.localizedDescription)")
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            return false
         }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, error in
-            DispatchQueue.main.async {
-                if let error {
-                    Log.ui.error("relaunch from Applications failed: \(error.localizedDescription)")
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                }
-                NSApp.terminate(nil)
-            }
+        ApplicationRelaunch.requestTermination(helper: helper) {
+            NSApp.terminate(nil)
         }
+        return false
     }
 }

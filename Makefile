@@ -10,7 +10,13 @@ APP       := $(BUILD_DIR)/Build/Products/Release/MenuBarHider.app
 #   SIGN_IDENTITY := Developer ID Application
 #   TEAM          := XXXXXXXXXX
 -include local.mk
-SIGN_IDENTITY ?= -
+# Source builds default to ad-hoc signing; release builds need a Developer ID.
+ifeq ($(origin SIGN_IDENTITY), undefined)
+SIGN_IDENTITY := -
+RELEASE_SIGN_IDENTITY ?= Developer ID Application
+else
+RELEASE_SIGN_IDENTITY ?= $(SIGN_IDENTITY)
+endif
 TEAM          ?=
 SIGN_FLAGS    := CODE_SIGN_IDENTITY="$(SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(TEAM)"
 
@@ -32,17 +38,17 @@ lint:
 	xcrun swift-format lint --recursive --configuration .swift-format MenuBarHider MenuBarHiderTests
 
 run: build
-	pkill -x MenuBarHider || true
+	@if pgrep -x MenuBarHider >/dev/null; then \
+		echo "Quit MenuBarHider from its menu before running a different build." >&2; \
+		exit 1; \
+	fi
 	open $(APP)
 
 install: build
-	pkill -x MenuBarHider || true
-	rm -rf /Applications/MenuBarHider.app
-	cp -R $(APP) /Applications/MenuBarHider.app
-	open /Applications/MenuBarHider.app
+	scripts/install.sh "$(APP)"
 
 release:
-	SIGN_IDENTITY="$(SIGN_IDENTITY)" TEAM="$(TEAM)" scripts/release.sh
+	SIGN_IDENTITY="$(RELEASE_SIGN_IDENTITY)" TEAM="$(TEAM)" scripts/release.sh
 
 clean:
 	rm -rf $(BUILD_DIR) dist MenuBarHider.xcodeproj

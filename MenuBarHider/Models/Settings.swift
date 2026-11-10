@@ -8,6 +8,7 @@ final class Settings {
         static let autoHideSeconds = "autoHideSeconds"
         static let hiddenBundleIDs = "hiddenBundleIDs"
         static let removedMenuExtraIDs = "removedMenuExtraIDs"
+        static let hidingMethod = "hidingMethod"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -30,5 +31,10 @@ final class Settings {
     var removedMenuExtraIDs: Set<String> {
         get { Set(defaults.stringArray(forKey: Key.removedMenuExtraIDs) ?? []) }
         set { defaults.set(Array(newValue).sorted(), forKey: Key.removedMenuExtraIDs) }
+    }
+
+    var hidingMethod: HidingMethod {
+        get { HidingMethod(rawValue: defaults.string(forKey: Key.hidingMethod) ?? "") ?? .assessment }
+        set { defaults.set(newValue.rawValue, forKey: Key.hidingMethod) }
     }
 }

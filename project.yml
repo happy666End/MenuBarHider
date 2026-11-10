@@ -2,7 +2,7 @@ name: MenuBarHider
 options:
   bundleIdPrefix: com.sava
   deploymentTarget:
-    macOS: "26.0"
+    macOS: "27.0"
   createIntermediateGroups: true
   generateEmptyDirectories: true
 settings:
@@ -23,6 +23,8 @@ targets:
     sources:
       - path: MenuBarHider
         excludes: ["Resources/Info.plist"]
+      - path: LICENSE
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.sava.MenuBarHider

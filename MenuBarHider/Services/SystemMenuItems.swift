@@ -1,60 +1,94 @@
 import AppKit
 import ApplicationServices
 
-/// Where the clock item hosted by MenuBarAgent sits on screen.
 final class SystemMenuItems {
+    private struct CachedFrame {
+        let screen: CGRect
+        let frame: CGRect
+        let at: Date
+    }
+
     private static let clockIdentifier = "com.apple.menuextra.clock"
-    /// The frame is queried on pointer movement, so it is cached briefly to avoid AX round trips.
     private static let frameLifetime: TimeInterval = 2
-    /// The element changes only when MenuBarAgent restarts; re-resolving it is the expensive part.
-    private static let elementLifetime: TimeInterval = 60
 
-    private var cachedFrame: (frame: CGRect, at: Date)?
-    private var cachedElement: (element: AXUIElement, at: Date)?
+    private let primaryScreenHeight: () -> CGFloat?
+    private let screenFrame: (CGPoint) -> CGRect?
+    private let hitTest: (CGPoint) -> CGRect?
+    private var cachedFrames: [CachedFrame] = []
 
-    /// Frame in Cocoa screen coordinates; a miss is not cached, the bar is usually mid-relayout.
-    func clockFrame() -> CGRect? {
-        if let cachedFrame, Date().timeIntervalSince(cachedFrame.at) < Self.frameLifetime { return cachedFrame.frame }
-        guard let frame = queryClockFrame() else {
-            Log.ui.error("clock frame unavailable")
-            return nil
-        }
-        cachedFrame = (frame, Date())
-        return frame
+    init(
+        primaryScreenHeight: @escaping () -> CGFloat? = SystemMenuItems.primaryHeight,
+        screenFrame: @escaping (CGPoint) -> CGRect? = SystemMenuItems.screenFrame,
+        hitTest: @escaping (CGPoint) -> CGRect? = SystemMenuItems.hitTestClock
+    ) {
+        self.primaryScreenHeight = primaryScreenHeight
+        self.screenFrame = screenFrame
+        self.hitTest = hitTest
     }
 
-    private func queryClockFrame() -> CGRect? {
-        guard let element = clockElement(),
-            let origin = AXAttributes.point(element, kAXPositionAttribute),
-            let size = AXAttributes.size(element, kAXSizeAttribute)
-        else {
-            cachedElement = nil
-            return nil
+    func clockFrame(at location: CGPoint) -> CGRect? {
+        guard let screen = screenFrame(location) else { return nil }
+        let now = Date()
+        cachedFrames.removeAll { now.timeIntervalSince($0.at) >= Self.frameLifetime }
+        if let cached = cachedFrames.first(where: { $0.screen == screen }) {
+            return cached.frame.contains(location) ? cached.frame : nil
         }
-        // Accessibility reports a top-left origin; Cocoa screen coordinates start bottom-left.
-        guard let primary = NSScreen.screens.first(where: { $0.frame.origin == .zero }) ?? NSScreen.screens.first
+        guard let height = primaryScreenHeight(),
+            let frame = hitTest(CGPoint(x: location.x, y: height - location.y))
         else { return nil }
-        let flippedY = primary.frame.height - origin.y - size.height
-        return CGRect(x: origin.x, y: flippedY, width: size.width, height: size.height)
+        // AX uses the primary display's top-left origin even for secondary-display hits.
+        let cocoaFrame = CGRect(x: frame.minX, y: height - frame.maxY, width: frame.width, height: frame.height)
+        guard cocoaFrame.contains(location) else { return nil }
+        cachedFrames.append(CachedFrame(screen: screen, frame: cocoaFrame, at: now))
+        Log.ui.error("clock click target: \(String(describing: cocoaFrame), privacy: .public)")
+        return cocoaFrame
     }
 
-    private func clockElement() -> AXUIElement? {
-        if let cachedElement, Date().timeIntervalSince(cachedElement.at) < Self.elementLifetime {
-            return cachedElement.element
-        }
+    func invalidateCache() {
+        cachedFrames.removeAll()
+    }
+
+    private static func primaryHeight() -> CGFloat? {
+        (NSScreen.screens.first(where: { $0.frame.origin == .zero }) ?? NSScreen.screens.first)?.frame.height
+    }
+
+    private static func screenFrame(at location: CGPoint) -> CGRect? {
+        NSScreen.screens.first(where: { $0.frame.contains(location) })?.frame
+    }
+
+    private static func hitTestClock(at point: CGPoint) -> CGRect? {
         guard
-            let agent = NSRunningApplication.runningApplications(withBundleIdentifier: SystemItems.menuBarAgentBundleID)
-                .first,
-            let bar = AXAttributes.extrasMenuBar(pid: agent.processIdentifier, timeout: 0.3)
+            let app = NSRunningApplication.runningApplications(withBundleIdentifier: SystemItems.menuBarAgentBundleID)
+                .first
         else { return nil }
-        // Items are wrapped in hosting groups, so the clock sits one level below the bar.
-        for group in AXAttributes.elements(bar, kAXChildrenAttribute) {
-            for child in AXAttributes.elements(group, kAXChildrenAttribute)
-            where AXAttributes.string(child, kAXIdentifierAttribute) == Self.clockIdentifier {
-                cachedElement = (child, Date())
-                return child
-            }
+        let agent = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(agent, 0.3)
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(agent, Float(point.x), Float(point.y), &hit) == .success,
+            let hit
+        else { return nil }
+
+        if AXAttributes.string(hit, kAXIdentifierAttribute) == clockIdentifier {
+            // The hosting group owns the clock's clickable padding, including text.
+            guard let parent = AXAttributes.element(hit, kAXParentAttribute),
+                AXAttributes.string(parent, kAXRoleAttribute) == kAXGroupRole,
+                let parentFrame = frame(of: parent)
+            else { return frame(of: hit) }
+            return parentFrame
         }
-        return nil
+
+        guard AXAttributes.string(hit, kAXRoleAttribute) == kAXGroupRole,
+            AXAttributes.elements(hit, kAXChildrenAttribute).contains(where: {
+                AXAttributes.string($0, kAXIdentifierAttribute) == clockIdentifier
+            })
+        else { return nil }
+        return frame(of: hit)
+    }
+
+    private static func frame(of element: AXUIElement) -> CGRect? {
+        guard let origin = AXAttributes.point(element, kAXPositionAttribute),
+            let size = AXAttributes.size(element, kAXSizeAttribute), size.width > 0, size.height > 0
+        else { return nil }
+        return CGRect(origin: origin, size: size)
     }
 }

@@ -4,6 +4,7 @@ import Foundation
 
 final class FakeEngine: HidingEngine {
     var isAvailable = true
+    var requiresClockHover = true
     var appliedAllowList: [String]?
     var restrictions: [[String]] = []
     var releases = 0
@@ -25,7 +26,8 @@ final class FakeEngine: HidingEngine {
 final class FakeItems: MenuBarItemSource {
     var isTrusted = true
     var positions: [MenuBarItemPosition] = []
-    func scan() -> [MenuBarItemPosition] { positions }
+    var failedBundleIDs: Set<String> = []
+    func scan() -> MenuBarScan { MenuBarScan(positions: positions, failedBundleIDs: failedBundleIDs) }
 }
 
 final class FakeRunning: RunningAppsSource {

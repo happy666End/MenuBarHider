@@ -54,6 +54,7 @@ final class HidingController {
     private var hoverGrace: Cancellable?
     private var appsChange: Cancellable?
     private var permissionPoll: Cancellable?
+    private var observedBundleIDs: Set<String> = []
 
     var onChange: (() -> Void)?
 
@@ -81,11 +82,15 @@ final class HidingController {
     var isEngineAvailable: Bool { engine.isAvailable }
     var isAccessibilityTrusted: Bool { items.isTrusted }
     var canHide: Bool { engine.isAvailable && isInApplications && items.isTrusted }
+    var requiresClockHover: Bool { engine.requiresClockHover }
+    var hidingMethod: HidingMethod { settings.hidingMethod }
 
     // MARK: - Intent
 
     func start() {
+        lastError = engine.lastOperationError
         reconcileMenuExtras()
+        onChange?()
         permissionPoll = scheduler.schedule(after: Self.launchSettleDelay) { [weak self] in
             self?.hideWhenPermitted()
         }
@@ -108,11 +113,20 @@ final class HidingController {
         armAutoHide()
     }
 
+    func restoreVisibility() {
+        permissionPoll?.cancel()
+        permissionPoll = nil
+        show()
+        cancelPendingHide()
+    }
+
     func hide() {
         cancelPendingHide()
         guard canHide else {
+            lastError = engine.lastOperationError
             let reasons = "engine=\(engine.isAvailable) in /Applications=\(isInApplications) AX=\(items.isTrusted)"
             Log.controller.error("hide skipped: \(reasons, privacy: .public)")
+            onChange?()
             return
         }
         refreshHiddenSet()
@@ -142,6 +156,26 @@ final class HidingController {
         armAutoHide()
     }
 
+    func setHidingMethod(_ method: HidingMethod) {
+        guard let router = engine as? HidingEngineRouter else { return }
+        let wasHidden = state == .hidden
+        show()
+        guard lastError == nil else { return }
+        do {
+            try router.select(method)
+            pointerOverClock = false
+            lastError = nil
+            if wasHidden {
+                cancelPendingHide()
+                state = .hidden
+                reconcile()
+            }
+        } catch {
+            lastError = error
+        }
+        onChange?()
+    }
+
     /// Call on every app launch or quit: the allow list must follow the running set.
     func runningAppsChanged() {
         appsChange?.cancel()
@@ -150,21 +184,26 @@ final class HidingController {
         }
     }
 
-    func shutdown() {
+    @discardableResult
+    func shutdown() -> Bool {
         cancelPendingHide()
         hoverGrace?.cancel()
         appsChange?.cancel()
         permissionPoll?.cancel()
         state = .shown
         engine.release()
+        lastError = engine.lastOperationError
         reconcileMenuExtras()
+        onChange?()
+        return lastError == nil
     }
 
     // MARK: - Derivation
 
     private var desiredAllowList: [String]? {
         let hiddenApps = hiddenSet.filter { !MenuExtras.isExtra($0) }
-        guard state == .hidden, canHide, !pointerOverClock, !hiddenApps.isEmpty else { return nil }
+        guard state == .hidden, canHide, !(engine.requiresClockHover && pointerOverClock), !hiddenApps.isEmpty
+        else { return nil }
         return HiddenSet.allowList(
             running: runningApps.bundleIDs, hidden: hiddenApps, alwaysAllowed: SystemItems.alwaysAllowedBundleIDs)
     }
@@ -180,9 +219,10 @@ final class HidingController {
         reconcileMenuExtras()
         guard let desired = desiredAllowList else {
             engine.release()
+            lastError = engine.lastOperationError
             return
         }
-        guard desired != engine.appliedAllowList else { return }
+        guard desired != engine.requestedAllowList else { return }
         engine.restrict(allowedBundleIDs: desired) { [weak self] error in
             guard let self else { return }
             self.lastError = error
@@ -208,10 +248,17 @@ final class HidingController {
         let positions = separators()
         guard let separatorX = positions.separatorX else { return }
         let scanned = items.scan()
+        let running = Set(runningApps.bundleIDs)
+        let failed = scanned.failedBundleIDs.filter { MenuExtras.isExtra($0) || running.contains($0) }
+            .union(settings.removedMenuExtraIDs)
+        let observed = scanned.positions.filter { !failed.contains($0.bundleID) }
+        observedBundleIDs = Set(observed.map(\.bundleID)).union(observedBundleIDs.intersection(failed))
+        engine.updateObservedBundleIDs(observedBundleIDs, failedBundleIDs: failed)
         hiddenSet = HiddenSet.partition(
-            items: scanned, leftSeparatorX: positions.leftSeparatorX, separatorX: separatorX)
+            items: observed, leftSeparatorX: positions.leftSeparatorX, separatorX: separatorX
+        ).union(hiddenSet.intersection(failed))
         settings.hiddenBundleIDs = hiddenSet
-        let dump = scanned.map { "\($0.bundleID)@\(Int($0.x))" }
+        let dump = observed.map { "\($0.bundleID)@\(Int($0.x))" }
         let leftX = positions.leftSeparatorX.map { "\($0)" } ?? "none"
         Log.controller.error("scan: sep=\(separatorX) left=\(leftX) items=\(dump) hidden=\(self.hiddenSet.sorted())")
     }
@@ -229,7 +276,13 @@ final class HidingController {
     }
 
     private func hideWhenPermitted() {
-        guard state == .shown, isEngineAvailable, isInApplications else { return }
+        guard state == .shown, isEngineAvailable, isInApplications else {
+            if let error = engine.lastOperationError {
+                lastError = error
+                onChange?()
+            }
+            return
+        }
         if isAccessibilityTrusted {
             hide()
         } else {

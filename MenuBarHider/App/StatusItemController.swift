@@ -15,6 +15,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let leftSeparator: NSStatusItem
     private let menu = NSMenu()
     private var controller: HidingController?
+    private var nativeAccess: NativePreferencesAccess?
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -27,8 +28,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         updateIcon(state: .shown)
     }
 
-    func attach(_ controller: HidingController) {
+    func attach(_ controller: HidingController, nativeAccess: NativePreferencesAccess? = nil) {
         self.controller = controller
+        self.nativeAccess = nativeAccess
     }
 
     func stateChanged() {
@@ -56,6 +58,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func updateIcon(state: HidingController.State) {
         let name = state == .hidden ? "chevron.left.2" : "chevron.right.2"
         statusItem.button?.image = Self.symbol(name, description: "MenuBarHider")
+        statusItem.button?.setAccessibilityLabel(state == .hidden ? "Show Hidden Items" : "Hide Items")
+        statusItem.button?.setAccessibilityHelp(state == .hidden ? "Items are hidden" : "All items are visible")
+        leftSeparator.button?.setAccessibilityLabel("Hidden Items Boundary")
+        leftSeparator.button?.setAccessibilityHelp("Command-drag to choose which icons remain visible")
         leftSeparator.isVisible = state == .shown
     }
 
@@ -107,6 +113,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
 
         menu.addItem(autoHideMenu())
+        menu.addItem(hidingMethodMenu())
+        if controller.hidingMethod == .systemSettings || controller.lastError != nil {
+            menu.addItem(
+                item("Restore Menu Bar Visibility", symbol: "arrow.counterclockwise", action: #selector(restore)))
+        }
         let login = item("Launch at Login", symbol: nil, action: #selector(toggleLaunchAtLogin))
         login.state = SMAppService.mainApp.status == .enabled ? .on : .off
         menu.addItem(login)
@@ -119,7 +130,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func header(_ controller: HidingController) -> NSMenuItem {
         let status: String
         let symbol: String
-        if !controller.isEngineAvailable {
+        if let error = controller.lastError {
+            status = "Error: \(error.localizedDescription)"
+            symbol = "exclamationmark.triangle"
+        } else if !controller.isEngineAvailable {
             status = "Hiding unavailable on this macOS build"
             symbol = "exclamationmark.triangle"
         } else if !controller.isInApplications {
@@ -127,9 +141,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             symbol = "exclamationmark.triangle"
         } else if !controller.isAccessibilityTrusted {
             status = "Accessibility permission required"
-            symbol = "exclamationmark.triangle"
-        } else if let error = controller.lastError {
-            status = "Error: \(error.localizedDescription)"
             symbol = "exclamationmark.triangle"
         } else if controller.state == .hidden {
             let count = controller.hiddenSet.count
@@ -157,6 +168,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return parent
     }
 
+    private func hidingMethodMenu() -> NSMenuItem {
+        let parent = item("Hiding Method", symbol: nil, action: nil)
+        let submenu = NSMenu()
+        for method in HidingMethod.allCases {
+            let entry = item(method.title, symbol: nil, action: #selector(setHidingMethod(_:)))
+            entry.representedObject = method.rawValue
+            entry.state = controller?.hidingMethod == method ? .on : .off
+            submenu.addItem(entry)
+        }
+        submenu.addItem(.separator())
+        submenu.addItem(
+            item("Allow Access to Menu Bar Settings…", symbol: "folder", action: #selector(grantNativeAccess)))
+        parent.submenu = submenu
+        return parent
+    }
+
     private func item(_ title: String, symbol: String?, action: Selector?, keyEquivalent: String = "") -> NSMenuItem {
         let entry = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
         entry.target = self
@@ -169,6 +196,40 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func toggle() { controller?.toggle() }
 
     @objc private func refresh() { controller?.rescan() }
+
+    @objc private func restore() { controller?.restoreVisibility() }
+
+    @objc private func setHidingMethod(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let method = HidingMethod(rawValue: raw) else { return }
+        controller?.setHidingMethod(method)
+        if let error = controller?.lastError { showHidingError(error) }
+    }
+
+    @objc private func grantNativeAccess() {
+        do {
+            guard try nativeAccess?.requestAccess() == true else { return }
+            controller?.show()
+            controller?.setHidingMethod(.systemSettings)
+            let selectionError = controller?.lastError
+            controller?.restoreVisibility()
+            if let error = selectionError ?? controller?.lastError { throw error }
+        } catch {
+            showHidingError(error)
+        }
+    }
+
+    private func showHidingError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Could Not Change Menu Bar Visibility"
+        var detail = error.localizedDescription
+        if case SystemTrackedApplicationsStore.Failure.unreadable = error {
+            detail +=
+                "\n\nUse Hiding Method → Allow Access to Menu Bar Settings. "
+                + "Select only the group.com.apple.controlcenter folder."
+        }
+        alert.informativeText = detail
+        alert.runModal()
+    }
 
     @objc private func setAutoHide(_ sender: NSMenuItem) {
         controller?.setAutoHideSeconds(sender.tag)

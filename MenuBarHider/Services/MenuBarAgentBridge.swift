@@ -28,10 +28,21 @@ protocol HidingEngine: AnyObject {
     var isAvailable: Bool { get }
     /// The allow list currently in force, nil while nothing is restricted.
     var appliedAllowList: [String]? { get }
+    var requestedAllowList: [String]? { get }
+    var requiresClockHover: Bool { get }
+    var lastOperationError: Error? { get }
+    func updateObservedBundleIDs(_ bundleIDs: Set<String>, failedBundleIDs: Set<String>)
     /// `completion` runs at most once, on the main thread, and never for a request
     /// superseded by a later `restrict` or `release`.
     func restrict(allowedBundleIDs: [String], completion: @escaping (Error?) -> Void)
     func release()
+}
+
+extension HidingEngine {
+    var requestedAllowList: [String]? { appliedAllowList }
+    var requiresClockHover: Bool { true }
+    var lastOperationError: Error? { nil }
+    func updateObservedBundleIDs(_ bundleIDs: Set<String>, failedBundleIDs: Set<String> = []) {}
 }
 
 final class MenuBarAgentBridge: HidingEngine {
@@ -43,6 +54,7 @@ final class MenuBarAgentBridge: HidingEngine {
     private let classes: (assertion: NSObject.Type, configuration: NSObject.Type)?
     private var active: (assertion: AssessmentModeAssertion, allowList: [String])?
     private var pending: AssessmentModeAssertion?
+    private var pendingAllowList: [String]?
 
     init() {
         // Every selector must exist: an unchecked message send would crash instead of degrading.
@@ -62,8 +74,12 @@ final class MenuBarAgentBridge: HidingEngine {
 
     var isAvailable: Bool { classes != nil }
     var appliedAllowList: [String]? { active?.allowList }
+    var requestedAllowList: [String]? { pending != nil ? pendingAllowList : active?.allowList }
 
     func restrict(allowedBundleIDs: [String], completion: @escaping (Error?) -> Void) {
+        pending?.invalidate()
+        pending = nil
+        pendingAllowList = nil
         guard let classes else {
             completion(MenuBarAgentBridgeError.unavailable)
             return
@@ -73,14 +89,15 @@ final class MenuBarAgentBridge: HidingEngine {
             return
         }
 
-        pending?.invalidate()
         let assertion = unsafeBitCast(classes.assertion.init(), to: AssessmentModeAssertion.self)
         pending = assertion
+        pendingAllowList = allowedBundleIDs
         log.error("activating restriction, allowed bundle ids: \(allowedBundleIDs.count)")
         assertion.activate(with: configuration) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self, self.pending === assertion else { return }
                 self.pending = nil
+                self.pendingAllowList = nil
                 if let error {
                     // Keep the previous restriction: a failed replacement must not unhide anything.
                     assertion.invalidate()
@@ -101,6 +118,7 @@ final class MenuBarAgentBridge: HidingEngine {
         log.error("releasing restriction")
         pending?.invalidate()
         pending = nil
+        pendingAllowList = nil
         active?.assertion.invalidate()
         active = nil
     }
