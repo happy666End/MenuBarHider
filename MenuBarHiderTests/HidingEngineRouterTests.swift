@@ -107,6 +107,34 @@ final class HidingEngineRouterTests: XCTestCase {
     }
 
     @MainActor
+    func testAvailabilityProbePreservesActiveHidingWhenAccessIsMissing() {
+        settings.autoHideSeconds = 0
+        let items = FakeItems()
+        items.positions = [.init(bundleID: "app.a", x: 100)]
+        let running = FakeRunning()
+        running.bundleIDs = ["app.a"]
+        let controller = HidingController(
+            engine: router, items: items, runningApps: running, extras: FakeExtras(),
+            separators: { .init(separatorX: 500, leftSeparatorX: nil) },
+            isInApplications: true, settings: settings, scheduler: ManualScheduler())
+        controller.hide()
+        let restriction = router.requestedRestriction
+        store.readError = SystemTrackedApplicationsStore.Failure.unreadable
+
+        XCTAssertThrowsError(try controller.validateSystemSettingsAvailability())
+
+        XCTAssertEqual(controller.state, .hidden)
+        XCTAssertEqual(router.method, .assessment)
+        XCTAssertEqual(settings.hidingMethod, .assessment)
+        XCTAssertEqual(router.requestedRestriction, restriction)
+        XCTAssertEqual(legacy.releases, 0)
+        XCTAssertEqual(store.writes, 0)
+        XCTAssertTrue(journal.owned.isEmpty)
+        XCTAssertNil(controller.lastError)
+        XCTAssertNil(router.lastOperationError)
+    }
+
+    @MainActor
     func testMethodSwitchPreservesSelectionDuringTemporaryEmptyLayout() {
         settings.autoHideSeconds = 0
         let items = FakeItems()

@@ -25,6 +25,10 @@ final class HidingEngineRouter: HidingEngine {
     var requiresClockHover: Bool { current.requiresClockHover }
     var lastOperationError: Error? { recoveryError ?? selectionError ?? current.lastOperationError }
 
+    func validateSystemSettingsAvailability() throws {
+        try native.validateAvailability()
+    }
+
     func updateObservedBundleIDs(_ bundleIDs: Set<String>, failedBundleIDs: Set<String> = []) {
         native.updateObservedBundleIDs(bundleIDs, failedBundleIDs: failedBundleIDs)
     }

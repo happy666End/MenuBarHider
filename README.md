@@ -66,9 +66,9 @@ Right-click either separator for the menu:
 | Show Hidden Items / Hide Items | Same as a left click |
 | Rescan Layout | Re-read which icons sit between `\|` and `»` |
 | Auto-hide After | Never, 5 seconds, 10 seconds, 30 seconds, or 1 minute |
-| Hiding Method | Choose Compatibility or System Settings (Experimental) |
-| Allow Access to Menu Bar Settings… | Inside Hiding Method; grant access to the Control Center folder |
-| Restore Menu Bar Visibility | Retry restoration and keep items shown; appears for the experimental method or after an error |
+| Advanced | Choose Compatibility or explicitly enable System Settings (Experimental) |
+| Menu Bar Settings Access… | Inside Advanced; grant folder access without changing the hiding method |
+| Restore Menu Bar Visibility | Retry restoration and keep items shown; in Advanced for the experimental method, or next to error details |
 | Launch at Login | Start the app at login through `SMAppService` |
 
 ## Hiding methods
@@ -90,7 +90,8 @@ on this macOS build**.
 
 ### System Settings (Experimental)
 
-Choose **Hiding Method → Allow Access to Menu Bar Settings…**, then select only:
+Choose **Advanced → System Settings (Experimental)…** and confirm after reading the limitations.
+If folder access is needed, select only:
 
 ```text
 ~/Library/Group Containers/group.com.apple.controlcenter
@@ -98,8 +99,9 @@ Choose **Hiding Method → Allow Access to Menu Bar Settings…**, then select o
 
 This is folder access, not Full Disk Access. Accessibility is still required to read
 icon positions. An access or format error leaves the selected method unchanged.
-Granting access selects the experimental method and keeps icons shown until you
-explicitly hide them.
+Enabling the experimental method keeps icons shown until you explicitly hide them.
+**Advanced → Menu Bar Settings Access…** can renew folder access separately; it does
+not change the selected method.
 
 This method changes macOS's persistent per-app menu bar switches. It does not activate
 an assessment restriction or use the clock-hover workaround. It is optional;

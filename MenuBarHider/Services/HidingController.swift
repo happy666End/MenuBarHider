@@ -156,6 +156,11 @@ final class HidingController {
         armAutoHide()
     }
 
+    func validateSystemSettingsAvailability() throws {
+        guard let router = engine as? HidingEngineRouter else { throw NativeHidingFailure.unavailable }
+        try router.validateSystemSettingsAvailability()
+    }
+
     func setHidingMethod(_ method: HidingMethod) {
         guard let router = engine as? HidingEngineRouter else { return }
         let wasHidden = state == .hidden

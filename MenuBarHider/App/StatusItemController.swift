@@ -3,7 +3,7 @@ import ServiceManagement
 
 /// The two separator icons in the menu bar and the context menu behind them.
 @MainActor
-final class StatusItemController: NSObject, NSMenuDelegate {
+final class StatusItemController: NSObject {
     private static let repositoryURL = URL(string: "https://github.com/happy666End/MenuBarHider")!
     private static let autoHideChoices: [(seconds: Int, title: String)] = [
         (0, "Never"), (5, "5 seconds"), (10, "10 seconds"), (30, "30 seconds"), (60, "1 minute"),
@@ -87,110 +87,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    // MARK: - Menu
-
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        guard let controller else { return }
-
-        menu.addItem(header(controller))
-        if !controller.isInApplications {
-            menu.addItem(item("Move to Applications…", symbol: "folder", action: #selector(moveToApplications)))
-        } else if !controller.isAccessibilityTrusted {
-            menu.addItem(
-                item("Open Accessibility Settings…", symbol: "hand.raised", action: #selector(openAccessibility)))
-        }
-        menu.addItem(.separator())
-
-        if controller.state == .hidden {
-            menu.addItem(item("Show Hidden Items", symbol: "eye", action: #selector(toggle)))
-        } else {
-            menu.addItem(item("Hide Items", symbol: "eye.slash", action: #selector(toggle)))
-        }
-        let rescan = item("Rescan Layout", symbol: "arrow.clockwise", action: #selector(refresh))
-        rescan.toolTip = "Re-read which icons sit between the | and » separators."
-        menu.addItem(rescan)
-        menu.addItem(.separator())
-
-        menu.addItem(autoHideMenu())
-        menu.addItem(hidingMethodMenu())
-        if controller.hidingMethod == .systemSettings || controller.lastError != nil {
-            menu.addItem(
-                item("Restore Menu Bar Visibility", symbol: "arrow.counterclockwise", action: #selector(restore)))
-        }
-        let login = item("Launch at Login", symbol: nil, action: #selector(toggleLaunchAtLogin))
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        menu.addItem(login)
-        menu.addItem(.separator())
-
-        menu.addItem(item("About MenuBarHider", symbol: nil, action: #selector(openRepository)))
-        menu.addItem(item("Quit MenuBarHider", symbol: nil, action: #selector(quit), keyEquivalent: "q"))
-    }
-
-    private func header(_ controller: HidingController) -> NSMenuItem {
-        let status: String
-        let symbol: String
-        if let error = controller.lastError {
-            status = "Error: \(error.localizedDescription)"
-            symbol = "exclamationmark.triangle"
-        } else if !controller.isEngineAvailable {
-            status = "Hiding unavailable on this macOS build"
-            symbol = "exclamationmark.triangle"
-        } else if !controller.isInApplications {
-            status = "Hiding works only from Applications"
-            symbol = "exclamationmark.triangle"
-        } else if !controller.isAccessibilityTrusted {
-            status = "Accessibility permission required"
-            symbol = "exclamationmark.triangle"
-        } else if controller.state == .hidden {
-            let count = controller.hiddenSet.count
-            status = count == 1 ? "Hiding 1 app" : "Hiding \(count) apps"
-            symbol = "eye.slash"
-        } else {
-            status = "All items visible"
-            symbol = "eye"
-        }
-        let line = item(status, symbol: symbol, action: nil)
-        line.isEnabled = false
-        return line
-    }
-
-    private func autoHideMenu() -> NSMenuItem {
-        let parent = item("Auto-hide After", symbol: "timer", action: nil)
-        let submenu = NSMenu()
-        for choice in Self.autoHideChoices {
-            let entry = item(choice.title, symbol: nil, action: #selector(setAutoHide(_:)))
-            entry.tag = choice.seconds
-            entry.state = controller?.settings.autoHideSeconds == choice.seconds ? .on : .off
-            submenu.addItem(entry)
-        }
-        parent.submenu = submenu
-        return parent
-    }
-
-    private func hidingMethodMenu() -> NSMenuItem {
-        let parent = item("Hiding Method", symbol: nil, action: nil)
-        let submenu = NSMenu()
-        for method in HidingMethod.allCases {
-            let entry = item(method.title, symbol: nil, action: #selector(setHidingMethod(_:)))
-            entry.representedObject = method.rawValue
-            entry.state = controller?.hidingMethod == method ? .on : .off
-            submenu.addItem(entry)
-        }
-        submenu.addItem(.separator())
-        submenu.addItem(
-            item("Allow Access to Menu Bar Settings…", symbol: "folder", action: #selector(grantNativeAccess)))
-        parent.submenu = submenu
-        return parent
-    }
-
-    private func item(_ title: String, symbol: String?, action: Selector?, keyEquivalent: String = "") -> NSMenuItem {
-        let entry = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
-        entry.target = self
-        if let symbol { entry.image = Self.symbol(symbol) }
-        return entry
-    }
-
     // MARK: - Actions
 
     @objc private func toggle() { controller?.toggle() }
@@ -200,22 +96,60 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func restore() { controller?.restoreVisibility() }
 
     @objc private func setHidingMethod(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let method = HidingMethod(rawValue: raw) else { return }
-        controller?.setHidingMethod(method)
-        if let error = controller?.lastError { showHidingError(error) }
+        guard let raw = sender.representedObject as? String, let method = HidingMethod(rawValue: raw),
+            let controller, method != controller.hidingMethod
+        else { return }
+        if method == .systemSettings {
+            guard confirmExperimentalMode() else { return }
+            do {
+                do {
+                    try controller.validateSystemSettingsAvailability()
+                } catch SystemTrackedApplicationsStore.Failure.unreadable {
+                    guard try nativeAccess?.requestAccess() == true else { return }
+                    try controller.validateSystemSettingsAvailability()
+                }
+                controller.restoreVisibility()
+                defer { controller.restoreVisibility() }
+                controller.setHidingMethod(method)
+                if let error = controller.lastError { throw error }
+            } catch { showHidingError(error) }
+        } else {
+            controller.setHidingMethod(method)
+            if let error = controller.lastError { showHidingError(error) }
+        }
     }
 
     @objc private func grantNativeAccess() {
         do {
             guard try nativeAccess?.requestAccess() == true else { return }
-            controller?.show()
-            controller?.setHidingMethod(.systemSettings)
-            let selectionError = controller?.lastError
             controller?.restoreVisibility()
-            if let error = selectionError ?? controller?.lastError { throw error }
+            if let error = controller?.lastError { throw error }
         } catch {
             showHidingError(error)
         }
+    }
+
+    private func confirmExperimentalMode() -> Bool {
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Try System Settings Hiding?"
+        alert.informativeText = """
+            This experimental mode uses macOS's per-app menu bar switches and keeps Notification Center available.
+
+            Some Apple icons are unsupported, and icons that share a system switch cannot be hidden separately. \
+            After a force quit or crash, reopen MenuBarHider to restore the items it hid.
+
+            You may be asked to select the Control Center settings folder. \
+            All items will stay visible until you choose Hide Items.
+            """
+        alert.addButton(withTitle: "Try System Settings")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
+    @objc private func showCurrentError() {
+        if let error = controller?.lastError { showHidingError(error) }
     }
 
     private func showHidingError(_ error: Error) {
@@ -224,7 +158,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         var detail = error.localizedDescription
         if case SystemTrackedApplicationsStore.Failure.unreadable = error {
             detail +=
-                "\n\nUse Hiding Method → Allow Access to Menu Bar Settings. "
+                "\n\nUse Advanced → Menu Bar Settings Access. "
                 + "Select only the group.com.apple.controlcenter folder."
         }
         alert.informativeText = detail
@@ -255,11 +189,128 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         ApplicationsMover.move()
     }
 
+    @objc private func showAbout() {
+        NSApp.activate()
+        NSApp.orderFrontStandardAboutPanel(options: [:])
+    }
+
     @objc private func openRepository() {
         NSWorkspace.shared.open(Self.repositoryURL)
     }
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+}
+
+extension StatusItemController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard let controller else { return }
+
+        menu.addItem(header(controller))
+        if controller.lastError != nil {
+            menu.addItem(item("Show Error Details…", symbol: "info.circle", action: #selector(showCurrentError)))
+            menu.addItem(
+                item("Restore Menu Bar Visibility", symbol: "arrow.counterclockwise", action: #selector(restore)))
+        }
+        if !controller.isInApplications {
+            menu.addItem(item("Move to Applications…", symbol: "folder", action: #selector(moveToApplications)))
+        } else if !controller.isAccessibilityTrusted {
+            menu.addItem(
+                item("Open Accessibility Settings…", symbol: "hand.raised", action: #selector(openAccessibility)))
+        }
+        menu.addItem(.separator())
+
+        if controller.state == .hidden {
+            menu.addItem(item("Show Hidden Items", symbol: "eye", action: #selector(toggle)))
+        } else {
+            menu.addItem(item("Hide Items", symbol: "eye.slash", action: #selector(toggle)))
+        }
+        let rescan = item("Rescan Layout", symbol: "arrow.clockwise", action: #selector(refresh))
+        rescan.toolTip = "Re-read which icons sit between the | and » separators."
+        menu.addItem(rescan)
+        menu.addItem(.separator())
+
+        menu.addItem(autoHideMenu())
+        let login = item("Launch at Login", symbol: nil, action: #selector(toggleLaunchAtLogin))
+        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        menu.addItem(login)
+        menu.addItem(advancedMenu())
+        menu.addItem(.separator())
+
+        menu.addItem(item("Help & Feedback…", symbol: "questionmark.circle", action: #selector(openRepository)))
+        menu.addItem(item("About MenuBarHider", symbol: nil, action: #selector(showAbout)))
+        menu.addItem(item("Quit MenuBarHider", symbol: nil, action: #selector(quit), keyEquivalent: "q"))
+    }
+
+    private func header(_ controller: HidingController) -> NSMenuItem {
+        let status: String
+        let symbol: String
+        if controller.lastError != nil {
+            status = "Menu bar action failed"
+            symbol = "exclamationmark.triangle"
+        } else if !controller.isEngineAvailable {
+            status = "Hiding unavailable on this macOS build"
+            symbol = "exclamationmark.triangle"
+        } else if !controller.isInApplications {
+            status = "Hiding works only from Applications"
+            symbol = "exclamationmark.triangle"
+        } else if !controller.isAccessibilityTrusted {
+            status = "Accessibility permission required"
+            symbol = "exclamationmark.triangle"
+        } else if controller.state == .hidden {
+            let count = controller.hiddenSet.count
+            status = count == 1 ? "Hiding 1 item" : "Hiding \(count) items"
+            symbol = "eye.slash"
+        } else {
+            status = "All items visible"
+            symbol = "eye"
+        }
+        let line = item(status, symbol: symbol, action: nil)
+        line.isEnabled = false
+        return line
+    }
+
+    private func autoHideMenu() -> NSMenuItem {
+        let parent = item("Auto-hide After", symbol: "timer", action: nil)
+        let submenu = NSMenu()
+        for choice in Self.autoHideChoices {
+            let entry = item(choice.title, symbol: nil, action: #selector(setAutoHide(_:)))
+            entry.tag = choice.seconds
+            entry.state = controller?.settings.autoHideSeconds == choice.seconds ? .on : .off
+            submenu.addItem(entry)
+        }
+        parent.submenu = submenu
+        return parent
+    }
+
+    private func advancedMenu() -> NSMenuItem {
+        let parent = item("Advanced", symbol: "gearshape", action: nil)
+        let submenu = NSMenu()
+        for method in HidingMethod.allCases {
+            let selected = controller?.hidingMethod == method
+            let title = method.title + (method == .systemSettings && !selected ? "…" : "")
+            let entry = item(title, symbol: nil, action: #selector(setHidingMethod(_:)))
+            entry.representedObject = method.rawValue
+            entry.state = selected ? .on : .off
+            submenu.addItem(entry)
+        }
+        submenu.addItem(.separator())
+        submenu.addItem(
+            item("Menu Bar Settings Access…", symbol: "folder", action: #selector(grantNativeAccess)))
+        if controller?.hidingMethod == .systemSettings && controller?.lastError == nil {
+            submenu.addItem(
+                item("Restore Menu Bar Visibility", symbol: "arrow.counterclockwise", action: #selector(restore)))
+        }
+        parent.submenu = submenu
+        return parent
+    }
+
+    private func item(_ title: String, symbol: String?, action: Selector?, keyEquivalent: String = "") -> NSMenuItem {
+        let entry = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+        entry.target = self
+        if let symbol { entry.image = Self.symbol(symbol) }
+        return entry
     }
 }
