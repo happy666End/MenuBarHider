@@ -159,10 +159,11 @@ final class HidingController {
     func setHidingMethod(_ method: HidingMethod) {
         guard let router = engine as? HidingEngineRouter else { return }
         let wasHidden = state == .hidden
+        let selection = restrictionForHiddenItems
         show()
         guard lastError == nil else { return }
         do {
-            try router.select(method)
+            try router.select(method, restriction: selection)
             pointerOverClock = false
             lastError = nil
             if wasHidden {
@@ -200,12 +201,19 @@ final class HidingController {
 
     // MARK: - Derivation
 
-    private var desiredAllowList: [String]? {
-        let hiddenApps = hiddenSet.filter { !MenuExtras.isExtra($0) }
-        guard state == .hidden, canHide, !(engine.requiresClockHover && pointerOverClock), !hiddenApps.isEmpty
-        else { return nil }
-        return HiddenSet.allowList(
-            running: runningApps.bundleIDs, hidden: hiddenApps, alwaysAllowed: SystemItems.alwaysAllowedBundleIDs)
+    private var restrictionForHiddenItems: MenuBarRestriction? {
+        let hiddenApps = hiddenSet.filter { !MenuExtras.isExtra($0) && !SystemItems.isSystemSelection($0) }
+        let hiddenSystemItems = SystemItems.hiddenIdentifiers(in: hiddenSet)
+        guard !hiddenApps.isEmpty || !hiddenSystemItems.isEmpty else { return nil }
+        return MenuBarRestriction(
+            allowedBundleIDs: HiddenSet.allowList(
+                running: runningApps.bundleIDs, hidden: hiddenApps, alwaysAllowed: SystemItems.alwaysAllowedBundleIDs),
+            hiddenSystemItems: hiddenSystemItems)
+    }
+
+    private var desiredRestriction: MenuBarRestriction? {
+        guard state == .hidden, canHide, !(engine.requiresClockHover && pointerOverClock) else { return nil }
+        return restrictionForHiddenItems
     }
 
     /// No pointerOverClock check: unloaded extras do not block Notification Center.
@@ -216,14 +224,21 @@ final class HidingController {
 
     /// Idempotent: an unchanged allow list is not re-sent.
     private func reconcile() {
+        let desired = desiredRestriction
+        do {
+            if let desired { try engine.validate(desired) }
+        } catch {
+            lastError = error
+            return
+        }
         reconcileMenuExtras()
-        guard let desired = desiredAllowList else {
+        guard let desired else {
             engine.release()
             lastError = engine.lastOperationError
             return
         }
-        guard desired != engine.requestedAllowList else { return }
-        engine.restrict(allowedBundleIDs: desired) { [weak self] error in
+        guard desired != engine.requestedRestriction else { return }
+        engine.restrict(desired) { [weak self] error in
             guard let self else { return }
             self.lastError = error
             if let error { Log.controller.error("restrict failed: \(error.localizedDescription)") }
@@ -249,8 +264,10 @@ final class HidingController {
         guard let separatorX = positions.separatorX else { return }
         let scanned = items.scan()
         let running = Set(runningApps.bundleIDs)
-        let failed = scanned.failedBundleIDs.filter { MenuExtras.isExtra($0) || running.contains($0) }
-            .union(settings.removedMenuExtraIDs)
+        let failed = scanned.failedBundleIDs.filter {
+            MenuExtras.isExtra($0) || running.contains($0) || SystemItems.selectionIDs.contains($0)
+        }
+        .union(settings.removedMenuExtraIDs)
         let observed = scanned.positions.filter { !failed.contains($0.bundleID) }
         observedBundleIDs = Set(observed.map(\.bundleID)).union(observedBundleIDs.intersection(failed))
         engine.updateObservedBundleIDs(observedBundleIDs, failedBundleIDs: failed)

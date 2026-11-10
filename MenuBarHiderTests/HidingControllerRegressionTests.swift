@@ -33,6 +33,21 @@ final class HidingControllerRegressionTests: XCTestCase {
         controller.hide()
     }
 
+    func testAppleAgentInsideBoundariesIsExcludedFromAllowList() {
+        running.bundleIDs = ["com.apple.TextInputMenuAgent", "com.apple.Siri", "third.party"]
+        items.positions = [
+            .init(bundleID: "com.apple.TextInputMenuAgent", x: 200),
+            .init(bundleID: "com.apple.Siri", x: 700),
+        ]
+
+        controller.hide()
+
+        XCTAssertEqual(controller.hiddenSet, ["com.apple.TextInputMenuAgent"])
+        XCTAssertFalse(engine.appliedAllowList?.contains("com.apple.TextInputMenuAgent") ?? true)
+        XCTAssertTrue(engine.appliedAllowList?.contains("com.apple.Siri") ?? false)
+        XCTAssertTrue(engine.appliedAllowList?.contains("third.party") ?? false)
+    }
+
     func testPartialScanRetainsFailedRunningAppButAcceptsObservedMovement() {
         running.bundleIDs = ["left", "other"]
         items.positions = [.init(bundleID: "left", x: 100), .init(bundleID: "other", x: 200)]

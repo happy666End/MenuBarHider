@@ -4,6 +4,31 @@ import XCTest
 @testable import MenuBarHider
 
 final class MenuBarScannerTests: XCTestCase {
+    func testAppleAgentsAreScannedButSharedHostsAndDaemonsAreExcluded() {
+        let fixture = ScanAXFixture()
+        let candidates: [MenuBarScanner.Application] = [
+            .init(pid: -20, bundleID: "com.apple.TextInputMenuAgent", activationPolicy: .accessory),
+            .init(pid: -21, bundleID: "com.apple.future-agent", activationPolicy: .accessory),
+            .init(pid: -22, bundleID: "third.party", activationPolicy: .regular),
+            .init(pid: -23, bundleID: "com.apple.MenuBarAgent", activationPolicy: .accessory),
+            .init(pid: -24, bundleID: "com.apple.systemuiserver", activationPolicy: .accessory),
+            .init(pid: -25, bundleID: "com.apple.controlcenter", activationPolicy: .accessory),
+            .init(pid: -26, bundleID: "background.daemon", activationPolicy: .prohibited),
+        ]
+        let scanner = MenuBarScanner(
+            extras: FakeExtras(), applications: { candidates }, reader: fixture.reader,
+            systemItems: { MenuBarScan(positions: []) })
+
+        let scan = scanner.scan()
+
+        XCTAssertEqual(
+            Set(scan.positions.map(\.bundleID)),
+            [
+                "com.apple.TextInputMenuAgent", "com.apple.future-agent", "third.party",
+            ])
+        XCTAssertTrue(scan.failedBundleIDs.isEmpty)
+    }
+
     func testExtrasBarAbsenceIsHealthyOnlyForNoValueAndUnsupported() {
         for error in [AXError.noValue, .attributeUnsupported] {
             let scan = scanApplication(extras: (error, nil))

@@ -41,6 +41,26 @@ final class NativeHidingEngineTests: XCTestCase {
         return try PropertyListSerialization.data(fromPropertyList: array, format: .binary, options: 0)
     }
 
+    func testRegisteredAppleAppUsesItsOrdinaryOwnerSwitch() throws {
+        let id = "com.apple.registered-status-app"
+        let key: [String: Any] = ["bundle": ["_0": id]]
+        store.data = try PropertyListSerialization.data(
+            fromPropertyList: [
+                key, ["location": key, "isAllowed": true, "menuItemLocations": [key]],
+            ], format: .binary, options: 0)
+        running.bundleIDs = [id]
+        var result: Error?
+
+        engine.restrict(allowedBundleIDs: []) { result = $0 }
+
+        XCTAssertNil(result)
+        XCTAssertEqual(try states()[id], false)
+        XCTAssertEqual(journal.owned, [id])
+        engine.release()
+        XCTAssertEqual(try states()[id], true)
+        XCTAssertTrue(journal.owned.isEmpty)
+    }
+
     private func hideA() -> Error? {
         var result: Error?
         engine.restrict(allowedBundleIDs: ["app.b"]) { result = $0 }

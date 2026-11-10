@@ -29,6 +29,9 @@ protocol HidingEngine: AnyObject {
     /// The allow list currently in force, nil while nothing is restricted.
     var appliedAllowList: [String]? { get }
     var requestedAllowList: [String]? { get }
+    var requestedRestriction: MenuBarRestriction? { get }
+    func validate(_ restriction: MenuBarRestriction) throws
+    func restrict(_ restriction: MenuBarRestriction, completion: @escaping (Error?) -> Void)
     var requiresClockHover: Bool { get }
     var lastOperationError: Error? { get }
     func updateObservedBundleIDs(_ bundleIDs: Set<String>, failedBundleIDs: Set<String>)
@@ -40,6 +43,19 @@ protocol HidingEngine: AnyObject {
 
 extension HidingEngine {
     var requestedAllowList: [String]? { appliedAllowList }
+    var requestedRestriction: MenuBarRestriction? {
+        requestedAllowList.map { MenuBarRestriction(allowedBundleIDs: $0) }
+    }
+    func validate(_ restriction: MenuBarRestriction) throws {
+        guard restriction.hiddenSystemItems.isEmpty else { throw HidingRestrictionFailure.unsupportedAppleItems }
+    }
+    func restrict(_ restriction: MenuBarRestriction, completion: @escaping (Error?) -> Void) {
+        do { try validate(restriction) } catch {
+            completion(error)
+            return
+        }
+        restrict(allowedBundleIDs: restriction.allowedBundleIDs, completion: completion)
+    }
     var requiresClockHover: Bool { true }
     var lastOperationError: Error? { nil }
     func updateObservedBundleIDs(_ bundleIDs: Set<String>, failedBundleIDs: Set<String> = []) {}
@@ -52,9 +68,9 @@ final class MenuBarAgentBridge: HidingEngine {
 
     private let log = Log.bridge
     private let classes: (assertion: NSObject.Type, configuration: NSObject.Type)?
-    private var active: (assertion: AssessmentModeAssertion, allowList: [String])?
+    private var active: (assertion: AssessmentModeAssertion, restriction: MenuBarRestriction)?
     private var pending: AssessmentModeAssertion?
-    private var pendingAllowList: [String]?
+    private var pendingRestriction: MenuBarRestriction?
 
     init() {
         // Every selector must exist: an unchecked message send would crash instead of degrading.
@@ -73,31 +89,37 @@ final class MenuBarAgentBridge: HidingEngine {
     }
 
     var isAvailable: Bool { classes != nil }
-    var appliedAllowList: [String]? { active?.allowList }
-    var requestedAllowList: [String]? { pending != nil ? pendingAllowList : active?.allowList }
+    var appliedAllowList: [String]? { active?.restriction.allowedBundleIDs }
+    var requestedRestriction: MenuBarRestriction? { pending != nil ? pendingRestriction : active?.restriction }
+    var requestedAllowList: [String]? { requestedRestriction?.allowedBundleIDs }
+    func validate(_ restriction: MenuBarRestriction) throws {}
 
     func restrict(allowedBundleIDs: [String], completion: @escaping (Error?) -> Void) {
+        restrict(MenuBarRestriction(allowedBundleIDs: allowedBundleIDs), completion: completion)
+    }
+
+    func restrict(_ restriction: MenuBarRestriction, completion: @escaping (Error?) -> Void) {
         pending?.invalidate()
         pending = nil
-        pendingAllowList = nil
+        pendingRestriction = nil
         guard let classes else {
             completion(MenuBarAgentBridgeError.unavailable)
             return
         }
-        guard let configuration = Self.makeConfiguration(classes.configuration, bundleIDs: allowedBundleIDs) else {
+        guard let configuration = Self.makeConfiguration(classes.configuration, restriction: restriction) else {
             completion(MenuBarAgentBridgeError.configurationFailed)
             return
         }
 
         let assertion = unsafeBitCast(classes.assertion.init(), to: AssessmentModeAssertion.self)
         pending = assertion
-        pendingAllowList = allowedBundleIDs
-        log.error("activating restriction, allowed bundle ids: \(allowedBundleIDs.count)")
+        pendingRestriction = restriction
+        log.error("activating restriction, allowed bundle ids: \(restriction.allowedBundleIDs.count)")
         assertion.activate(with: configuration) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self, self.pending === assertion else { return }
                 self.pending = nil
-                self.pendingAllowList = nil
+                self.pendingRestriction = nil
                 if let error {
                     // Keep the previous restriction: a failed replacement must not unhide anything.
                     assertion.invalidate()
@@ -106,7 +128,7 @@ final class MenuBarAgentBridge: HidingEngine {
                 } else {
                     // The old assertion goes only once the new one is in place, so nothing flashes.
                     self.active?.assertion.invalidate()
-                    self.active = (assertion, allowedBundleIDs)
+                    self.active = (assertion, restriction)
                     completion(nil)
                 }
             }
@@ -118,16 +140,17 @@ final class MenuBarAgentBridge: HidingEngine {
         log.error("releasing restriction")
         pending?.invalidate()
         pending = nil
-        pendingAllowList = nil
+        pendingRestriction = nil
         active?.assertion.invalidate()
         active = nil
     }
 
     /// `[[MBAssessmentModeConfiguration alloc] initWithAllowedSystemItems:allowedBundleIdentifiers:]`
-    private static func makeConfiguration(_ cls: NSObject.Type, bundleIDs: [String]) -> AnyObject? {
+    private static func makeConfiguration(_ cls: NSObject.Type, restriction: MenuBarRestriction) -> AnyObject? {
         // alloc returns +1 which init consumes; init returns +1 that we own, so take it retained.
         let allocated = (cls as AnyObject).perform(NSSelectorFromString("alloc"))?.takeUnretainedValue()
-        let systemItems = SystemItems.allowedIdentifiers as NSArray
-        return allocated?.perform(configurationInit, with: systemItems, with: bundleIDs as NSArray)?.takeRetainedValue()
+        let systemItems = SystemItems.allowedIdentifiers(hiding: restriction.hiddenSystemItems) as NSArray
+        return allocated?.perform(configurationInit, with: systemItems, with: restriction.allowedBundleIDs as NSArray)?
+            .takeRetainedValue()
     }
 }

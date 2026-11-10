@@ -20,6 +20,8 @@ final class HidingEngineRouter: HidingEngine {
     var isAvailable: Bool { recoveryError == nil && current.isAvailable }
     var appliedAllowList: [String]? { current.appliedAllowList }
     var requestedAllowList: [String]? { current.requestedAllowList }
+    var requestedRestriction: MenuBarRestriction? { current.requestedRestriction }
+    func validate(_ restriction: MenuBarRestriction) throws { try current.validate(restriction) }
     var requiresClockHover: Bool { current.requiresClockHover }
     var lastOperationError: Error? { recoveryError ?? selectionError ?? current.lastOperationError }
 
@@ -27,7 +29,7 @@ final class HidingEngineRouter: HidingEngine {
         native.updateObservedBundleIDs(bundleIDs, failedBundleIDs: failedBundleIDs)
     }
 
-    func select(_ method: HidingMethod) throws {
+    func select(_ method: HidingMethod, restriction: MenuBarRestriction? = nil) throws {
         do {
             current.release()
             if let error = current.lastOperationError {
@@ -37,6 +39,7 @@ final class HidingEngineRouter: HidingEngine {
             try native.recover()
             recoveryError = nil
             if method == .systemSettings { try native.validateAvailability() }
+            if let restriction { try (method == .systemSettings ? native : assessment).validate(restriction) }
             self.method = method
             settings.hidingMethod = method
             selectionError = nil
@@ -47,12 +50,16 @@ final class HidingEngineRouter: HidingEngine {
     }
 
     func restrict(allowedBundleIDs: [String], completion: @escaping (Error?) -> Void) {
+        restrict(MenuBarRestriction(allowedBundleIDs: allowedBundleIDs), completion: completion)
+    }
+
+    func restrict(_ restriction: MenuBarRestriction, completion: @escaping (Error?) -> Void) {
         guard isAvailable else {
             completion(lastOperationError ?? NativeHidingFailure.unavailable)
             return
         }
         selectionError = nil
-        current.restrict(allowedBundleIDs: allowedBundleIDs, completion: completion)
+        current.restrict(restriction, completion: completion)
     }
 
     func release() {

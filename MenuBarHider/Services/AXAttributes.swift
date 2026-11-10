@@ -40,6 +40,15 @@ struct AXAttributeReader {
         return children.map { unsafeDowncast($0, to: AXUIElement.self) }
     }
 
+    func optionalString(_ element: AXUIElement, _ name: String) throws -> String? {
+        do {
+            guard let value = try raw(element, name) as? String else { throw AXAttributeError.invalidValue }
+            return value
+        } catch AXAttributeError.accessibility(let error) where error == .noValue || error == .attributeUnsupported {
+            return nil
+        }
+    }
+
     func point(_ element: AXUIElement, _ name: String) throws -> CGPoint {
         let value = try raw(element, name)
         guard CFGetTypeID(value) == AXValueGetTypeID() else { throw AXAttributeError.invalidValue }

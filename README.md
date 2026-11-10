@@ -138,7 +138,8 @@ flowchart TD
     HC --> EXTRAS[Apple menu extras: unload / reload]
 ```
 
-The scanner reads third-party icon positions from each app's `AXExtrasMenuBar`; the
+The scanner reads app icon positions, including Apple agents such as the input menu,
+from each app's `AXExtrasMenuBar`; the
 separators are MenuBarHider's own `NSStatusItem`s. If scanning an app fails, its icons
 keep their previous hidden or visible state.
 
@@ -147,6 +148,20 @@ both hiding methods. They are plugins loaded into `SystemUIServer`, which does n
 expose a distinct bundle identifier for each extra. MenuBarHider unloads selected
 extras through private `CoreMenuExtra` calls in HIServices and loads them back when
 shown. Their order in `SystemUIServer` is used to match them to their positions.
+
+### Apple menu bar items
+
+Compatibility also follows separator positions for Wi-Fi, Bluetooth, battery, display,
+sound, keyboard brightness and screen mirroring. These controls share `MenuBarAgent`,
+so they are identified separately from app bundle identifiers. The clock and Control
+Center always stay visible. Unknown system controls are left visible; an incomplete
+scan preserves previous selections.
+
+Apple agents with their own status items, including the input menu, are scanned like
+other apps. System Settings can hide registered Apple applications with their own
+per-app switch. For unregistered Apple agents and system controls, it shows an error
+before preferences or Apple plugins change. Choose Compatibility for that layout;
+MenuBarHider never switches methods automatically.
 
 ## Recovery and limitations
 

@@ -61,6 +61,12 @@ final class NativeHidingEngine: HidingEngine {
         self.failedBundleIDs = failedBundleIDs
     }
 
+    func validate(_ restriction: MenuBarRestriction) throws {
+        guard restriction.hiddenSystemItems.isEmpty else { throw HidingRestrictionFailure.unsupportedAppleItems }
+        let document = try TrackedApplicationsDocument(data: store.read())
+        _ = try desiredOwners(allowedBundleIDs: restriction.allowedBundleIDs, document: document)
+    }
+
     func recover() throws {
         do {
             let owned = try journal.load()
@@ -117,15 +123,7 @@ final class NativeHidingEngine: HidingEngine {
     private func apply(_ allowedBundleIDs: [String]) throws {
         let document = try TrackedApplicationsDocument(data: store.read())
         let states = try document.states()
-        let hidden = Set(runningApps.bundleIDs).subtracting(allowedBundleIDs)
-        let desiredOwners = try owners(for: hidden, in: document)
-        let running = Set(runningApps.bundleIDs)
-        let visibleItems = (observedBundleIDs ?? running).union(failedBundleIDs.intersection(running))
-            .intersection(allowedBundleIDs)
-        let visibleOwners = try owners(for: visibleItems, in: document, requireRegistered: false)
-        guard desiredOwners.isDisjoint(with: visibleOwners) else {
-            throw NativeHidingFailure.sharedVisibleOwner
-        }
+        let desiredOwners = try desiredOwners(allowedBundleIDs: allowedBundleIDs, document: document)
         let owned = try journal.load()
         let newOwnership = desiredOwners.filter { states[$0] == true }
         let nextOwnership = newOwnership.union(owned.intersection(desiredOwners))
@@ -147,6 +145,21 @@ final class NativeHidingEngine: HidingEngine {
         if pendingRecovery != nextOwnership { try journal.save(nextOwnership) }
     }
 
+    private func desiredOwners(
+        allowedBundleIDs: [String], document: TrackedApplicationsDocument
+    ) throws -> Set<String> {
+        let hidden = Set(runningApps.bundleIDs).subtracting(allowedBundleIDs)
+        let desiredOwners = try owners(for: hidden, in: document)
+        let running = Set(runningApps.bundleIDs)
+        let visibleItems = (observedBundleIDs ?? running).union(failedBundleIDs.intersection(running))
+            .intersection(allowedBundleIDs)
+        let visibleOwners = try owners(for: visibleItems, in: document, requireRegistered: false)
+        guard desiredOwners.isDisjoint(with: visibleOwners) else {
+            throw NativeHidingFailure.sharedVisibleOwner
+        }
+        return desiredOwners
+    }
+
     private func owners(
         for bundleIDs: Set<String>, in document: TrackedApplicationsDocument, requireRegistered: Bool = true
     ) throws -> Set<String> {
@@ -160,7 +173,13 @@ final class NativeHidingEngine: HidingEngine {
                     break
                 }
             }
-            if let owner { result.insert(owner) } else { missing += 1 }
+            if let owner {
+                result.insert(owner)
+            } else if requireRegistered && id.hasPrefix("com.apple.") {
+                throw HidingRestrictionFailure.unsupportedAppleItems
+            } else {
+                missing += 1
+            }
         }
         guard !requireRegistered || missing == 0 else {
             throw NativeHidingFailure.unregisteredApplications(missing)
